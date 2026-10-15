@@ -10,13 +10,14 @@ import { libraryTools, libraryCategories, getToolsByCategory, type LibraryTool }
 interface Note { id: string; title: string; content: string; date: string; }
 interface DownloadItem { id: string; name: string; source: 'github' | 'huggingface'; url: string; size?: string; status: string; date: string; compatible?: boolean; }
 type SkillLevel = 'beginner' | 'experienced' | 'advanced';
-type ActivePage = 'dashboard' | 'library' | 'tools' | 'profiles' | 'cloud' | 'downloads' | 'uploads' | 'history' | 'local-llm' | 'browse-all';
+type ActivePage = 'dashboard' | 'library' | 'tools' | 'profiles' | 'cloud' | 'downloads' | 'uploads' | 'history' | 'local-llm' | 'browse-all' | 'installed';
 
 interface ProjectTool { id: string; name: string; source: 'github' | 'huggingface' | 'tool'; url: string; type: string; description?: string; }
 interface Project { id: string; name: string; description: string; tools: ProjectTool[]; notes: string; createdAt: string; }
 interface ThemeConfig { primaryColor: string; secondaryColor: string; bgColor: string; cardBg: string; textColor: string; accentColor: string; backgroundPattern: string; metallicIntensity: number; }
 interface LocalLLM { name: string; status: 'running' | 'stopped' | 'not-installed'; models?: string[]; port?: number; }
 interface Toast { id: string; message: string; type: 'success' | 'info' | 'error'; }
+interface InstalledTool { id: string; name: string; category: string; installedAt: string; size: string; command: string; status: 'installed' | 'downloading' | 'failed'; }
 
 // ============ PREMIUM THEMES ============
 const premiumThemes: Record<string, ThemeConfig> = {
@@ -265,6 +266,9 @@ export default function App() {
   const [projects, setProjects] = useLocalStorage<Project[]>('gh_projects', []);
   const [activeProject, setActiveProject] = useState<string | null>(null);
 
+  // Installed Tools
+  const [installedTools, setInstalledTools] = useLocalStorage<InstalledTool[]>('gh_installed_tools', []);
+
   // History
   const [searchHistory, setSearchHistory] = useLocalStorage<string[]>('gh_search_history', []);
   const [usageStats, setUsageStats] = useLocalStorage('gh_usage_stats', { searches: 0, downloads: 0, lastActive: '' });
@@ -317,6 +321,48 @@ export default function App() {
     project.tools.forEach((tool, i) => { text += `${i + 1}. **${tool.name}** (${tool.source})\n   URL: ${tool.url}\n${tool.description ? `   ${tool.description}\n` : ''}\n`; });
     if (project.notes) text += `\n## Notes\n\n${project.notes}\n`;
     navigator.clipboard.writeText(text);
+  };
+
+  // Installation management
+  const installTool = (tool: any) => {
+    if (!tool.installCommand) {
+      addToast('❌ No installation command available', 'error');
+      return;
+    }
+    
+    // Check if already installed
+    const existing = installedTools.find(t => t.id === tool.id);
+    if (existing) {
+      addToast('⚠️ Tool already installed', 'info');
+      return;
+    }
+
+    // Add to installed tools
+    const newInstall: InstalledTool = {
+      id: tool.id,
+      name: tool.name,
+      category: tool.category,
+      installedAt: new Date().toLocaleDateString(),
+      size: tool.size || 'Unknown',
+      command: tool.installCommand,
+      status: 'installed'
+    };
+    setInstalledTools((prev: InstalledTool[]) => [...prev, newInstall]);
+    addToast(`✅ ${tool.name} installed successfully!`, 'success');
+  };
+
+  const uninstallTool = (toolId: string) => {
+    const tool = installedTools.find(t => t.id === toolId);
+    if (!tool) return;
+    
+    if (confirm(`Uninstall ${tool.name}?`)) {
+      setInstalledTools((prev: InstalledTool[]) => prev.filter(t => t.id !== toolId));
+      addToast(`🗑️ ${tool.name} uninstalled`, 'info');
+    }
+  };
+
+  const isToolInstalled = (toolId: string) => {
+    return installedTools.some(t => t.id === toolId);
   };
 
   // Search functions
@@ -394,6 +440,7 @@ export default function App() {
               {([
                 { id: 'library', label: 'Library', icon: '📚' },
                 { id: 'dashboard', label: 'Dashboard', icon: '⚡' },
+                { id: 'installed', label: 'Installed', icon: '💾' },
                 { id: 'browse-all', label: 'Browse All', icon: '🔍' },
                 { id: 'tools', label: 'Tools', icon: '🔧' },
                 { id: 'local-llm', label: 'Local LLM', icon: '🤖' },
@@ -506,7 +553,8 @@ export default function App() {
                 <LibraryToolCard key={tool.id} tool={tool} uniqueKey={tool.id} hoveredKey={hoveredKey}
                   onHover={setHoveredKey} onLeave={() => setHoveredKey(null)}
                   favorites={favorites} setFavorites={setFavorites} savedTools={savedTools} setSavedTools={setSavedTools}
-                  addToProject={addToProject} addToast={addToast} />
+                  addToProject={addToProject} addToast={addToast}
+                  installTool={installTool} uninstallTool={uninstallTool} isToolInstalled={isToolInstalled} />
               ))}
             </div>
           </div>
@@ -700,6 +748,44 @@ export default function App() {
           </div>
         )}
 
+        {/* INSTALLED TOOLS PAGE */}
+        {activePage === 'installed' && (
+          <div className="space-y-6 animate-fade-in">
+            <h2 className="text-2xl font-bold text-white">💾 Installed Tools</h2>
+            {installedTools.length === 0 ? (
+              <div className="metallic-card rounded-xl p-12 text-center">
+                <p className="text-4xl mb-3">📦</p>
+                <p className="text-gray-500">No tools installed yet. Go to Library to install tools!</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {installedTools.map((tool: InstalledTool) => (
+                  <div key={tool.id} className="metallic-card rounded-xl p-4">
+                    <div className="flex items-start justify-between">
+                      <div className="flex-1">
+                        <h3 className="font-bold text-white text-lg">{tool.name}</h3>
+                        <p className="text-xs text-gray-400 mt-1">Category: {tool.category}</p>
+                        <div className="flex gap-4 mt-2 text-xs text-gray-500">
+                          <span>📦 Size: {tool.size}</span>
+                          <span>📅 Installed: {tool.installedAt}</span>
+                        </div>
+                        <div className="mt-2 p-2 bg-black/30 rounded border border-gray-800">
+                          <p className="text-xs text-gray-400">Install Command:</p>
+                          <code className="text-xs text-cyan-400">{tool.command}</code>
+                        </div>
+                      </div>
+                      <button type="button" onClick={() => uninstallTool(tool.id)}
+                        className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 cursor-pointer active:scale-95">
+                        🗑️ Uninstall
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
         {/* DOWNLOADS PAGE */}
         {activePage === 'downloads' && (
           <div className="space-y-4 animate-fade-in">
@@ -769,11 +855,12 @@ export default function App() {
 }
 
 // ============ LIBRARY TOOL CARD ============
-function LibraryToolCard({ tool, uniqueKey, hoveredKey, onHover, onLeave, favorites, setFavorites, savedTools, setSavedTools, addToProject, addToast }: {
+function LibraryToolCard({ tool, uniqueKey, hoveredKey, onHover, onLeave, favorites, setFavorites, savedTools, setSavedTools, addToProject, addToast, installTool, uninstallTool, isToolInstalled }: {
   tool: LibraryTool; uniqueKey: string; hoveredKey: string | null; onHover: (key: string) => void; onLeave: () => void;
   favorites: Record<string, any[]>; setFavorites: (f: Record<string, any[]>) => void;
   savedTools: any[]; setSavedTools: (t: any[]) => void; addToProject: (t: any) => void;
   addToast: (msg: string, type?: 'success' | 'info' | 'error') => void;
+  installTool: (t: any) => void; uninstallTool: (id: string) => void; isToolInstalled: (id: string) => boolean;
 }) {
   const isHovered = hoveredKey === uniqueKey;
   const cardRef = useRef<HTMLDivElement>(null);
@@ -831,6 +918,9 @@ function LibraryToolCard({ tool, uniqueKey, hoveredKey, onHover, onLeave, favori
             <div className="flex items-center gap-2">
               <span className="text-xs text-gray-400">{tool.platform === 'github' ? '🐙' : tool.platform === 'huggingface' ? '🤗' : '🌐'}</span>
               <span className={`text-xs px-2 py-0.5 rounded ${tool.difficulty === 'beginner' ? 'bg-green-900/30 text-green-400' : tool.difficulty === 'intermediate' ? 'bg-blue-900/30 text-blue-400' : 'bg-purple-900/30 text-purple-400'}`}>{tool.difficulty}</span>
+              <span className={`text-xs px-2 py-0.5 rounded ${tool.type === 'online' ? 'bg-cyan-900/30 text-cyan-400 border border-cyan-500/30' : tool.type === 'local' ? 'bg-orange-900/30 text-orange-400 border border-orange-500/30' : 'bg-indigo-900/30 text-indigo-400 border border-indigo-500/30'}`}>
+                {tool.type === 'online' ? '☁️ Online' : tool.type === 'local' ? '💾 Local' : '🔄 Both'}
+              </span>
             </div>
           </div>
           {tool.free && <span className="text-xs px-2 py-1 rounded-full bg-green-900/30 text-green-400 border border-green-500/30">🆓 Free</span>}
@@ -839,6 +929,7 @@ function LibraryToolCard({ tool, uniqueKey, hoveredKey, onHover, onLeave, favori
         <div className="flex gap-2 mt-3">
           {tool.downloads && <span className="text-xs text-gray-500">⬇️ {tool.downloads.toLocaleString()}</span>}
           {tool.stars && <span className="text-xs text-gray-500">⭐ {tool.stars.toLocaleString()}</span>}
+          {tool.size && <span className="text-xs text-gray-500">📦 {tool.size}</span>}
         </div>
       </div>
 
@@ -853,10 +944,13 @@ function LibraryToolCard({ tool, uniqueKey, hoveredKey, onHover, onLeave, favori
                 <span className="text-2xl font-bold text-gradient">#{tool.rank}</span>
                 <h3 className="text-xl font-bold text-white">{tool.name}</h3>
               </div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-sm text-gray-400">{tool.platform === 'github' ? '🐙 GitHub' : tool.platform === 'huggingface' ? '🤗 Hugging Face' : '🌐 Both'}</span>
                 <span className="text-xs text-gray-500">•</span>
                 <span className="text-sm text-gray-400">{libraryCategories.find(c => c.id === tool.category)?.name}</span>
+                <span className={`text-xs px-2 py-0.5 rounded ${tool.type === 'online' ? 'bg-cyan-900/30 text-cyan-400 border border-cyan-500/30' : tool.type === 'local' ? 'bg-orange-900/30 text-orange-400 border border-orange-500/30' : 'bg-indigo-900/30 text-indigo-400 border border-indigo-500/30'}`}>
+                  {tool.type === 'online' ? '☁️ Online' : tool.type === 'local' ? '💾 Local' : '🔄 Both'}
+                </span>
               </div>
             </div>
             {tool.free && <span className="text-xs px-2 py-1 rounded-full bg-green-900/30 text-green-400 border border-green-500/30">🆓 Free</span>}
@@ -869,6 +963,12 @@ function LibraryToolCard({ tool, uniqueKey, hoveredKey, onHover, onLeave, favori
             <div><h4 className="text-sm font-semibold text-green-300 mb-2">💡 Use Cases</h4>
               <ul className="space-y-1">{tool.useCases.map((u: string, i: number) => <li key={i} className="text-xs text-gray-300 flex items-center gap-2"><span className="text-green-400">•</span>{u}</li>)}</ul>
             </div>
+            {tool.size && (
+              <div className="bg-black/30 rounded-lg p-3 border border-gray-800">
+                <p className="text-xs text-gray-400">📦 Size: <span className="text-white font-medium">{tool.size}</span></p>
+                {tool.installCommand && <p className="text-xs text-gray-400 mt-1">⚙️ Install: <code className="text-cyan-400">{tool.installCommand}</code></p>}
+              </div>
+            )}
             <div className="flex gap-2 pt-2">
               <button type="button" onClick={(e) => {
                 e.stopPropagation();
@@ -886,10 +986,21 @@ function LibraryToolCard({ tool, uniqueKey, hoveredKey, onHover, onLeave, favori
                 addToast('🛒 Added to project!', 'success');
               }} className="flex-1 px-3 py-2 rounded-lg text-xs font-medium text-white bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-500 hover:to-pink-500 cursor-pointer active:scale-95">🛒 Project</button>
             </div>
-            <button type="button" onClick={(e) => { e.stopPropagation(); addToast(`🔗 Opening ${tool.name}...`, 'info'); window.open(tool.url, '_blank', 'noopener,noreferrer'); }}
-              className="block w-full text-center px-4 py-2 rounded-lg text-sm text-white metallic-button hover:border-purple-500/50 cursor-pointer active:scale-95">
-              🔗 Open in {tool.platform === 'github' ? 'GitHub' : 'Hugging Face'}
-            </button>
+            {tool.type !== 'online' && (
+              <div className="flex gap-2">
+                {isToolInstalled(tool.id) ? (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); uninstallTool(tool.id); }}
+                    className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 cursor-pointer active:scale-95">
+                    🗑️ Uninstall
+                  </button>
+                ) : (
+                  <button type="button" onClick={(e) => { e.stopPropagation(); installTool(tool); }}
+                    className="flex-1 px-4 py-2 rounded-lg text-sm font-medium text-white bg-gradient-to-r from-green-600 to-emerald-600 hover:from-green-500 hover:to-emerald-500 cursor-pointer active:scale-95">
+                    📥 Install Locally
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>,
         document.body
